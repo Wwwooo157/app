@@ -34,14 +34,12 @@ void main() {
       final int g = (color.argb >> 8) & 0xFF;
       final int b = color.argb & 0xFF;
       // argb 必须与 hex 字段自洽（防止解析层把通道顺序搞反）
-      expect(
-        color.hex.toUpperCase(),
-        '#${r.toRadixString(16).padLeft(2, '0')}'
-                '${g.toRadixString(16).padLeft(2, '0')}'
-                '${b.toRadixString(16).padLeft(2, '0')}'
-            .toUpperCase(),
-        reason: '${color.code}',
-      );
+      final String expected =
+          '#${r.toRadixString(16).padLeft(2, '0')}'
+                  '${g.toRadixString(16).padLeft(2, '0')}'
+                  '${b.toRadixString(16).padLeft(2, '0')}'
+              .toUpperCase();
+      expect(color.hex.toUpperCase(), expected, reason: color.code);
     }
   });
 
