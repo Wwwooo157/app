@@ -10,6 +10,10 @@ import 'package:bead_light_board/data/models/palette.dart';
 import 'package:bead_light_board/data/repositories/palette_repository.dart';
 import 'package:bead_light_board/features/calibrate/data/calibration_storage.dart';
 import 'package:bead_light_board/features/calibrate/domain/calibration.dart';
+import 'package:bead_light_board/features/edit/domain/edit_history.dart';
+import 'package:bead_light_board/features/edit/domain/edit_tool.dart';
+import 'package:bead_light_board/features/edit/domain/pattern_editor.dart';
+import 'package:bead_light_board/features/edit/presentation/edit_toolbar.dart';
 import 'package:bead_light_board/features/eye_care/data/screen_awake.dart';
 import 'package:bead_light_board/features/eye_care/domain/eye_care_palette.dart';
 import 'package:bead_light_board/features/eye_care/domain/eye_care_settings.dart';
@@ -137,6 +141,39 @@ class GridScreenState extends State<GridScreen>
 
   String? _saveError;
 
+  // ---------------------------------------------------------------- 编辑 S10
+
+  /// 是否处于编辑模式（此时单指绘制，双指仍可平移缩放）。
+  bool _editing = false;
+
+  EditTool _editTool = EditTool.brush;
+  SymmetryMode _symmetry = SymmetryMode.none;
+
+  final PatternEditHistory _history = PatternEditHistory();
+
+  /// 当前这一笔的上一格（用于两次回调之间插值，快速划也不漏格）。
+  GridCell? _lastPaintCell;
+
+  /// 是否正在画一笔。
+  bool _paintStroke = false;
+
+  /// "重来"用的基准图（进入编辑模式时的样子）。
+  BeadPattern? _editBaseline;
+
+  /// 图纸/进度**内容版本号**。
+  ///
+  /// 图纸与进度都是就地修改的（同一个对象），`identical` 比不出变化 ——
+  /// 没有这个计数器，逐格标记与编辑都不会触发重绘。
+  int _revision = 0;
+
+  /// 供测试断言。
+  @visibleForTesting
+  bool get isEditing => _editing;
+
+  /// 供测试断言。
+  @visibleForTesting
+  PatternEditHistory get editHistory => _history;
+
   /// 供测试断言。
   @visibleForTesting
   Project? get currentProject => _project;
@@ -232,9 +269,10 @@ class GridScreenState extends State<GridScreen>
 
   Future<void> _loadPalette() async {
     try {
-      final Palette palette = await PaletteRepository().loadPalette(
-        fixtureAssetPath,
-      );
+      // 超时兜底：资源读取若卡住，界面必须说出来，而不是悄悄没有颜色。
+      final Palette palette = await PaletteRepository()
+          .loadPalette(fixtureAssetPath)
+          .timeout(const Duration(seconds: 3));
       if (!mounted) {
         return;
       }
@@ -245,6 +283,11 @@ class GridScreenState extends State<GridScreen>
         _paletteCodes = palette.colors.map((BeadColor c) => c.code).toList();
         _pattern = null;
       });
+    } on TimeoutException {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _paletteError = '读取超时（3s）');
     } catch (error) {
       if (!mounted) {
         return;
@@ -373,6 +416,7 @@ class GridScreenState extends State<GridScreen>
 
     setState(() {
       progress.setColorCompleted(active, completed: willComplete);
+      _revision++;
       if (!willComplete) {
         return;
       }
@@ -388,7 +432,7 @@ class GridScreenState extends State<GridScreen>
       // 所有用到的颜色都完成了：保持当前色，进度自然到 100%。
     });
     _syncBlinkAnimation();
-    _afterProgressChanged();
+    _scheduleProjectSave();
   }
 
   void _toggleBlink() {
@@ -401,7 +445,9 @@ class GridScreenState extends State<GridScreen>
   /// 这一点很重要：AnimationController 若一直 repeat，`pumpAndSettle` 会
   /// 永远等不到静止（widget test 直接超时），实机上也无谓耗电。
   void _syncBlinkAnimation() {
-    final bool shouldRun = _blinkEnabled && _activeColorIndex != null;
+    // 编辑模式下不高亮也不闪烁：编辑时要看到图纸的**真实颜色**。
+    final bool shouldRun =
+        !_editing && _blinkEnabled && _activeColorIndex != null;
     if (shouldRun) {
       if (!_blinkController.isAnimating) {
         _blinkController.repeat(reverse: true);
@@ -412,16 +458,183 @@ class GridScreenState extends State<GridScreen>
   }
 
   void _resetProgress() {
-    setState(() => _ensureProgress().reset());
-    _afterProgressChanged();
+    setState(() {
+      _ensureProgress().reset();
+      _revision++;
+    });
+    _scheduleProjectSave();
+  }
+
+  // ------------------------------------------------------------ 编辑逻辑 S10
+
+  void _enterEditMode() {
+    setState(() {
+      _editing = true;
+      // 逐格标记与绘制互斥：同样是"点格子"，含义不能有两种。
+      _perCellMarking = false;
+      _selected = null;
+      _history.clear();
+      _paintStroke = false;
+      _lastPaintCell = null;
+      _editBaseline = _copyPattern(_currentPattern);
+      // 没选色时默认用量最多的颜色，避免"点了没反应"。
+      _activeColorIndex ??= usageOrder.isEmpty ? null : usageOrder.first;
+    });
+    // 进编辑模式要停掉闪烁，否则编辑时图案会被高亮盖住，测试里也会等不到静止。
+    _syncBlinkAnimation();
+  }
+
+  void _exitEditMode() {
+    _finishStroke();
+    setState(() {
+      _editing = false;
+      _lastPaintCell = null;
+      _editBaseline = null;
+    });
+    _syncBlinkAnimation();
+    _scheduleProjectSave();
+  }
+
+  /// 落笔或移动：按当前工具修改图纸。
+  void _handlePaintCell(GridCell cell) {
+    final BeadPattern pattern = _currentPattern;
+
+    if (_editTool == EditTool.picker) {
+      final int? picked = PatternEditor.pick(pattern, cell.row, cell.col);
+      if (picked != null) {
+        setState(() => _activeColorIndex = picked);
+      }
+      return;
+    }
+
+    final int? colorIndex = _activeColorIndex;
+    if (colorIndex == null) {
+      return;
+    }
+
+    // 一笔 = 一步撤销
+    if (!_paintStroke) {
+      _history.beginBatch();
+      _paintStroke = true;
+      _lastPaintCell = null;
+    }
+
+    final List<CellChange> changes;
+    if (_editTool == EditTool.fill) {
+      changes = PatternEditor.floodFill(
+        pattern,
+        row: cell.row,
+        col: cell.col,
+        colorIndex: colorIndex,
+      );
+    } else {
+      final GridCell? last = _lastPaintCell;
+      changes = last == null
+          ? PatternEditor.paint(
+              pattern,
+              row: cell.row,
+              col: cell.col,
+              colorIndex: colorIndex,
+              symmetry: _symmetry,
+            )
+          : PatternEditor.paintLine(
+              pattern,
+              fromRow: last.row,
+              fromCol: last.col,
+              toRow: cell.row,
+              toCol: cell.col,
+              colorIndex: colorIndex,
+              symmetry: _symmetry,
+            );
+    }
+
+    _lastPaintCell = cell;
+    _history.record(changes);
+    if (changes.isNotEmpty) {
+      setState(() => _revision++);
+    }
+  }
+
+  /// 手势结束：给这一笔收尾（变成一步可撤销的操作）。
+  void _finishStroke() {
+    if (!_paintStroke) {
+      return;
+    }
+    _paintStroke = false;
+    _lastPaintCell = null;
+    if (_history.endBatch()) {
+      _scheduleProjectSave();
+    }
+  }
+
+  void _undoEdit() {
+    final List<CellChange>? changes = _history.undo();
+    if (changes == null) {
+      return;
+    }
+    PatternEditor.applyChanges(_currentPattern, changes, useBefore: true);
+    setState(() => _revision++);
+    _scheduleProjectSave();
+  }
+
+  void _redoEdit() {
+    final List<CellChange>? changes = _history.redo();
+    if (changes == null) {
+      return;
+    }
+    PatternEditor.applyChanges(_currentPattern, changes, useBefore: false);
+    setState(() => _revision++);
+    _scheduleProjectSave();
+  }
+
+  /// 重来：把图纸恢复成进入编辑模式时的样子（这一步本身也可撤销）。
+  void _resetPattern() {
+    final BeadPattern? baseline = _editBaseline;
+    if (baseline == null) {
+      return;
+    }
+    final BeadPattern pattern = _currentPattern;
+    final List<CellChange> changes = <CellChange>[];
+    for (int row = 0; row < pattern.rows; row++) {
+      for (int col = 0; col < pattern.cols; col++) {
+        final int before = pattern.colorIndexAt(row, col);
+        final int after = baseline.colorIndexAt(row, col);
+        if (before != after) {
+          changes.add(
+            CellChange(row: row, col: col, before: before, after: after),
+          );
+        }
+      }
+    }
+    if (changes.isEmpty) {
+      return;
+    }
+    PatternEditor.applyChanges(pattern, changes, useBefore: false);
+    _history.record(changes);
+    setState(() => _revision++);
+    _scheduleProjectSave();
+  }
+
+  static BeadPattern _copyPattern(BeadPattern source) {
+    final BeadPattern copy = BeadPattern.filled(
+      rows: source.rows,
+      cols: source.cols,
+      paletteId: source.paletteId,
+    );
+    for (int row = 0; row < source.rows; row++) {
+      for (int col = 0; col < source.cols; col++) {
+        copy.setColorIndexAt(row, col, source.colorIndexAt(row, col));
+      }
+    }
+    return copy;
   }
 
   // ------------------------------------------------------------ 项目保存 M5
 
-  /// 进度变了：若是已保存的项目，稍后自动落盘。
+  /// 进度或图纸变了：若是已保存的项目，稍后自动落盘。
   ///
-  /// 防抖是必要的：逐格标记时会连点，每次都写文件既慢又费闪存。
-  void _afterProgressChanged() {
+  /// 防抖是必要的：逐格标记与拖动绘制都会连点，每次都写文件既慢又费闪存。
+  void _scheduleProjectSave() {
     if (_project == null) {
       return;
     }
@@ -637,7 +850,10 @@ class GridScreenState extends State<GridScreen>
     });
   }
 
-  void _onScaleEnd(ScaleEndDetails details) => _persistCalibration();
+  void _onScaleEnd(ScaleEndDetails details) {
+    _finishStroke();
+    _persistCalibration();
+  }
 
   /// 微调：按毫米或按格数平移网格。
   void _nudge({int dxSteps = 0, int dySteps = 0, bool byPeg = false}) {
@@ -683,8 +899,11 @@ class GridScreenState extends State<GridScreen>
     }
     if (_perCellMarking) {
       // 逐格标记：抬起板子补记/纠错时用。
-      setState(() => _ensureProgress().togglePlaced(cell.row, cell.col));
-      _afterProgressChanged();
+      setState(() {
+        _ensureProgress().togglePlaced(cell.row, cell.col);
+        _revision++;
+      });
+      _scheduleProjectSave();
       return;
     }
     setState(() => _selected = cell);
@@ -783,18 +1002,22 @@ class GridScreenState extends State<GridScreen>
                   rulerPegSpan: _rulerPegSpan,
                   showAnchors: _showAnchors,
                   guideStyle: guideStyle,
-                  activeColorIndex: _activeColorIndex,
-                  hideOtherColors: _hideOtherColors,
+                  // 编辑模式下不高亮、不压暗、不闪烁：要看图纸的真实颜色。
+                  activeColorIndex: _editing ? null : _activeColorIndex,
+                  hideOtherColors: _editing ? false : _hideOtherColors,
                   progress: progress,
-                  // 只有"选了色 + 开了闪烁"才把动画接上，避免无意义的重绘。
-                  blink: _activeColorIndex != null && _blinkEnabled
+                  revision: _revision,
+                  // 只有"选了色 + 开了闪烁 + 非编辑"才把动画接上，避免无意义的重绘。
+                  blink: !_editing && _activeColorIndex != null && _blinkEnabled
                       ? _blinkController
                       : null,
+                  // 编辑模式下单指绘制，点击选格让位给绘制。
+                  onCellTap: locked || _editing ? null : _handleCellTap,
+                  onPaintCell: locked || !_editing ? null : _handlePaintCell,
                   // 锁定时传 null，彻底禁用手势（防误触）。
                   onScaleStart: locked ? null : _onScaleStart,
                   onScaleUpdate: locked ? null : _onScaleUpdate,
                   onScaleEnd: locked ? null : _onScaleEnd,
-                  onCellTap: locked ? null : _handleCellTap,
                 ),
               ),
               if (_showControls)
@@ -824,27 +1047,29 @@ class GridScreenState extends State<GridScreen>
                   left: 8,
                   right: 8,
                   bottom: 8,
-                  child: GuidePanel(
-                    stats: guideStats,
-                    usageOrder: usageOrder,
-                    colorOf: colorOf,
-                    codeOf: colorCodeOf,
-                    remainingOf: (int colorIndex) =>
-                        _remainingOfColor(progress, colorIndex),
-                    completedColors: progress.completedColors,
-                    hideOtherColors: _hideOtherColors,
-                    blinkEnabled: _blinkEnabled,
-                    perCellMarking: _perCellMarking,
-                    onSelectColor: _selectColor,
-                    onStepColor: _stepColor,
-                    onToggleCompleted: _toggleActiveColorCompleted,
-                    onHideOthersChanged: (bool value) =>
-                        setState(() => _hideOtherColors = value),
-                    onBlinkChanged: (_) => _toggleBlink(),
-                    onPerCellMarkingChanged: (bool value) =>
-                        setState(() => _perCellMarking = value),
-                    onResetProgress: _resetProgress,
-                  ),
+                  child: _editing
+                      ? _buildEditToolbar()
+                      : GuidePanel(
+                          stats: guideStats,
+                          usageOrder: usageOrder,
+                          colorOf: colorOf,
+                          codeOf: colorCodeOf,
+                          remainingOf: (int colorIndex) =>
+                              _remainingOfColor(progress, colorIndex),
+                          completedColors: progress.completedColors,
+                          hideOtherColors: _hideOtherColors,
+                          blinkEnabled: _blinkEnabled,
+                          perCellMarking: _perCellMarking,
+                          onSelectColor: _selectColor,
+                          onStepColor: _stepColor,
+                          onToggleCompleted: _toggleActiveColorCompleted,
+                          onHideOthersChanged: (bool value) =>
+                              setState(() => _hideOtherColors = value),
+                          onBlinkChanged: (_) => _toggleBlink(),
+                          onPerCellMarkingChanged: (bool value) =>
+                              setState(() => _perCellMarking = value),
+                          onResetProgress: _resetProgress,
+                        ),
                 ),
               // 软件调光：整屏叠一层深暖棕，降低反光与刺眼。不拦截触摸。
               if (_eyeCare.enabled && _eyeCare.hasDim)
@@ -866,6 +1091,29 @@ class GridScreenState extends State<GridScreen>
       ),
     );
   }
+
+  /// 编辑模式下的底部工具栏（顶替引导面板）。
+  Widget _buildEditToolbar() => EditToolbar(
+    // 列出**整张色卡**：编辑时要能引入还没用过的新颜色。
+    colorIndices: List<int>.generate(_paletteColors.length, (int i) => i),
+    colorOf: colorOf,
+    codeOf: colorCodeOf,
+    activeColorIndex: _activeColorIndex,
+    tool: _editTool,
+    symmetry: _symmetry,
+    canUndo: _history.canUndo,
+    canRedo: _history.canRedo,
+    saveLabel: _project == null ? '保存图纸' : null,
+    onSelectColor: _selectColor,
+    onToolChanged: (EditTool tool) => setState(() => _editTool = tool),
+    onSymmetryChanged: (SymmetryMode value) =>
+        setState(() => _symmetry = value),
+    onUndo: _undoEdit,
+    onRedo: _redoEdit,
+    onSave: _saveAsNewProject,
+    onResetPattern: _resetPattern,
+    onDone: _exitEditMode,
+  );
 
   Widget _buildControls({
     required BeadPattern pattern,
@@ -988,6 +1236,13 @@ class GridScreenState extends State<GridScreen>
                         ? null
                         : (_) => _changeKind(kind),
                   ),
+                // 编辑入口刻意做成**图标按钮**：顶部面板已经很挤，
+                // 再加带文字的控件会多占一行，直接压到网格上。
+                IconButton.filledTonal(
+                  tooltip: _editing ? '退出编辑' : '编辑图纸',
+                  onPressed: _editing ? _exitEditMode : _enterEditMode,
+                  icon: Icon(_editing ? Icons.edit_off : Icons.edit),
+                ),
                 const SizedBox(width: 8),
                 ChoiceChip(
                   label: const Text('亮点'),

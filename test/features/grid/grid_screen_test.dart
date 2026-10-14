@@ -2,11 +2,13 @@ import 'dart:io';
 
 import 'package:bead_light_board/data/models/bead_pattern.dart';
 import 'package:bead_light_board/features/calibrate/data/calibration_storage.dart';
+import 'package:bead_light_board/features/edit/presentation/edit_toolbar.dart';
 import 'package:bead_light_board/features/grid/data/physical_dpi.dart';
 import 'package:bead_light_board/features/grid/domain/grid_style.dart';
 import 'package:bead_light_board/features/grid/presentation/grid_canvas.dart';
 import 'package:bead_light_board/features/grid/presentation/grid_painter.dart';
 import 'package:bead_light_board/features/grid/presentation/grid_screen.dart';
+import 'package:bead_light_board/features/guide/presentation/guide_panel.dart';
 import 'package:bead_light_board/features/projects/data/project_repository.dart';
 import 'package:bead_light_board/features/projects/data/project_storage.dart';
 import 'package:bead_light_board/features/projects/domain/project.dart';
@@ -624,6 +626,281 @@ void main() {
 
       expect(find.textContaining('点此保存'), findsNothing);
       expect(find.textContaining('已保存'), findsNothing);
+    });
+  });
+
+  group('S10 图纸编辑', () {
+    /// 两色图纸：底色 1，左上角一格是 0（于是"用量最多的颜色"是 1）。
+    BeadPattern pattern() => BeadPattern.filled(
+      rows: 20,
+      cols: 30,
+      paletteId: 'test_fixture',
+      colorIndex: 1,
+    )..setColorIndexAt(0, 0, 0);
+
+    /// 画布上确定落在图纸内的一点（逻辑坐标，避开上下两块面板）。
+    const Offset canvasPoint = Offset(267, 400);
+
+    ({ProjectRepository repository, InMemoryProjectStorage storage})
+    makeProjects() {
+      final InMemoryProjectStorage storage = InMemoryProjectStorage();
+      return (
+        repository: ProjectRepository(
+          storage: storage,
+          clock: () => DateTime(2026, 2, 14, 12),
+        ),
+        storage: storage,
+      );
+    }
+
+    List<int> colorsOf(BeadPattern p) => <int>[
+      for (int row = 0; row < p.rows; row++)
+        for (int col = 0; col < p.cols; col++) p.colorIndexAt(row, col),
+    ];
+
+    int diffCount(List<int> a, List<int> b) {
+      int count = 0;
+      for (int i = 0; i < a.length; i++) {
+        if (a[i] != b[i]) {
+          count++;
+        }
+      }
+      return count;
+    }
+
+    /// 在工具栏内部查找文案。
+    ///
+    /// 必须限定范围：顶部面板也有「填充」（格子样式），全局 find.text 会撞名。
+    Finder inToolbar(String label) => find.descendant(
+      of: find.byType(EditToolbar),
+      matching: find.text(label),
+    );
+
+    Future<void> enterEdit(WidgetTester tester) async {
+      await tester.tap(find.byTooltip('编辑图纸'));
+      await tester.pumpAndSettle();
+      expect(find.byType(EditToolbar), findsOneWidget);
+    }
+
+    testWidgets('进入编辑模式：工具栏顶替引导面板', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+      await pumpScreen(tester, importedPattern: pattern());
+
+      expect(find.byType(GuidePanel), findsOneWidget);
+      expect(find.byType(EditToolbar), findsNothing);
+
+      await enterEdit(tester);
+
+      final GridScreenState state = tester.state<GridScreenState>(
+        find.byType(GridScreen),
+      );
+      expect(state.isEditing, isTrue);
+      expect(find.byType(EditToolbar), findsOneWidget);
+      expect(find.byType(GuidePanel), findsNothing);
+      expect(inToolbar('画笔'), findsOneWidget);
+      expect(inToolbar('填充'), findsOneWidget);
+      expect(inToolbar('吸管'), findsOneWidget);
+      expect(inToolbar('四向'), findsOneWidget);
+      expect(find.textContaining('点此保存'), findsOneWidget);
+      // 色卡必须真的加载出来了，否则色号会退化成 ?N
+      expect(inToolbar('T06'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('拖动绘制改色，且整笔只算一步撤销（撤销/重做都对）', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+      final BeadPattern editable = pattern();
+      await pumpScreen(tester, importedPattern: editable);
+
+      final List<int> before = colorsOf(editable);
+      await enterEdit(tester);
+
+      // 换一个与图纸现有颜色不同的刷子色（夹具色卡含 T01..T08）
+      await tester.tap(inToolbar('T06'));
+      await tester.pumpAndSettle();
+
+      await tester.dragFrom(canvasPoint, const Offset(80, 0));
+      await tester.pumpAndSettle();
+
+      final GridScreenState state = tester.state<GridScreenState>(
+        find.byType(GridScreen),
+      );
+      final List<int> afterDrag = colorsOf(editable);
+      expect(
+        diffCount(before, afterDrag),
+        greaterThan(1),
+        reason: '拖动应当改到多格（说明插值生效）',
+      );
+      expect(state.editHistory.undoDepth, 1, reason: '整笔只算一步');
+
+      await tester.tap(find.byTooltip('撤销'));
+      await tester.pumpAndSettle();
+      expect(colorsOf(editable), before, reason: '撤销应当完全恢复');
+
+      await tester.tap(find.byTooltip('重做'));
+      await tester.pumpAndSettle();
+      expect(colorsOf(editable), afterDrag, reason: '重做应当回到绘制后');
+
+      // 撤销按钮此时应当可用（历史还在）
+      expect(state.editHistory.canUndo, isTrue);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('左右对称：一次落笔同时改两侧（格数为偶数）', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+      final BeadPattern editable = pattern();
+      await pumpScreen(tester, importedPattern: editable);
+      await enterEdit(tester);
+
+      await tester.tap(inToolbar('T06'));
+      await tester.pumpAndSettle();
+      await tester.tap(inToolbar('左右'));
+      await tester.pumpAndSettle();
+
+      await tester.tapAt(canvasPoint);
+      await tester.pumpAndSettle();
+
+      final int changed = diffCount(colorsOf(pattern()), colorsOf(editable));
+      expect(changed, greaterThanOrEqualTo(2), reason: '对称应当至少改两格');
+      expect(changed.isEven, isTrue, reason: '左右对称改的格数必须是偶数');
+    });
+
+    testWidgets('填充工具一次改一大片', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+      final BeadPattern editable = pattern();
+      await pumpScreen(tester, importedPattern: editable);
+      await enterEdit(tester);
+
+      await tester.tap(inToolbar('T06'));
+      await tester.pumpAndSettle();
+      await tester.tap(inToolbar('填充'));
+      await tester.pumpAndSettle();
+      await tester.tapAt(canvasPoint);
+      await tester.pumpAndSettle();
+
+      expect(
+        diffCount(colorsOf(pattern()), colorsOf(editable)),
+        greaterThan(50),
+        reason: '油漆桶应当一次改一大片',
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('吸管：取走那格的颜色，之后用画笔涂同色不应有变化', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+      final BeadPattern editable = pattern();
+      await pumpScreen(tester, importedPattern: editable);
+      await enterEdit(tester);
+
+      await tester.tap(inToolbar('T06'));
+      await tester.pumpAndSettle();
+      await tester.tap(inToolbar('吸管'));
+      await tester.pumpAndSettle();
+      // 画布上那一点的底色是色号 1（T02）
+      await tester.tapAt(canvasPoint);
+      await tester.pumpAndSettle();
+
+      await tester.tap(inToolbar('画笔'));
+      await tester.pumpAndSettle();
+      await tester.tapAt(canvasPoint);
+      await tester.pumpAndSettle();
+
+      expect(
+        colorsOf(editable),
+        colorsOf(pattern()),
+        reason: '吸管取到的就是底色，再涂一遍不该产生任何变化',
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('编辑模式下点击不再选中格子（两种含义不冲突）', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+      await pumpScreen(tester, importedPattern: pattern());
+
+      await tester.tapAt(canvasPoint);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('已选中：第'), findsOneWidget);
+
+      await enterEdit(tester);
+      await tester.tapAt(const Offset(400, 430));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('已选中：第'), findsNothing);
+    });
+
+    testWidgets('编辑后退出会把新图纸写回项目', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+      final ({ProjectRepository repository, InMemoryProjectStorage storage})
+      projects = makeProjects();
+      final Project project = projects.repository.create(
+        name: '可编辑',
+        pattern: pattern(),
+      );
+      await projects.repository.save(project);
+      final int writesBefore = projects.storage.writeCount;
+
+      await pumpScreen(
+        tester,
+        project: project,
+        projectRepository: projects.repository,
+      );
+      await enterEdit(tester);
+
+      await tester.tap(inToolbar('T06'));
+      await tester.pumpAndSettle();
+      await tester.tapAt(canvasPoint);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(FilledButton, '完成'));
+      // 不能用 pumpAndSettle：退出编辑会恢复引导闪烁动画，永远等不到静止。
+      // 显式 pump 一次，让防抖保存（Duration.zero）的定时器跑掉即可。
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
+
+      final GridScreenState state = tester.state<GridScreenState>(
+        find.byType(GridScreen),
+      );
+      expect(state.isEditing, isFalse);
+      expect(find.byType(GuidePanel), findsOneWidget);
+      expect(
+        projects.storage.writeCount,
+        greaterThan(writesBefore),
+        reason: '编辑后应当自动落盘',
+      );
+
+      final Project reloaded = (await projects.repository.loadAll()).single;
+      expect(
+        colorsOf(reloaded.pattern),
+        colorsOf(project.pattern),
+        reason: '存回去的应当是编辑后的图纸',
+      );
+      expect(reloaded.name, '可编辑');
+    });
+
+    testWidgets('重来按钮把图纸恢复成进入编辑时的样子', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+      final BeadPattern editable = pattern();
+      await pumpScreen(tester, importedPattern: editable);
+      final List<int> baseline = colorsOf(editable);
+
+      await enterEdit(tester);
+      await tester.tap(inToolbar('T06'));
+      await tester.pumpAndSettle();
+      await tester.dragFrom(canvasPoint, const Offset(80, 0));
+      await tester.pumpAndSettle();
+      expect(colorsOf(editable), isNot(baseline));
+
+      await tester.tap(find.widgetWithText(TextButton, '重来'));
+      await tester.pumpAndSettle();
+      expect(colorsOf(editable), baseline);
+      expect(tester.takeException(), isNull);
     });
   });
 }

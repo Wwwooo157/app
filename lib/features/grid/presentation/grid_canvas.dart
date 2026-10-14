@@ -31,10 +31,12 @@ class GridCanvas extends StatelessWidget {
     this.hideOtherColors = false,
     this.progress,
     this.blink,
+    this.revision = 0,
     this.onScaleStart,
     this.onScaleUpdate,
     this.onScaleEnd,
     this.onCellTap,
+    this.onPaintCell,
   });
 
   final BeadPattern pattern;
@@ -63,6 +65,9 @@ class GridCanvas extends StatelessWidget {
   /// 闪烁动画（同时作为重绘触发器）。
   final Animation<double>? blink;
 
+  /// 图纸/进度内容版本号（就地修改时靠它触发重绘）。
+  final int revision;
+
   /// 手势回调。**锁定时由上层传 null**，从而彻底禁用手势（防误触）。
   final GestureScaleStartCallback? onScaleStart;
   final GestureScaleUpdateCallback? onScaleUpdate;
@@ -71,15 +76,55 @@ class GridCanvas extends StatelessWidget {
   /// 点击：回调命中的格子；点在图纸外时为 null。锁定时传 null。
   final ValueChanged<GridCell?>? onCellTap;
 
+  /// 编辑模式：**单指**绘制回调（落笔与每次移动都会回调命中的格子）。
+  ///
+  /// 传 null = 非编辑模式。传了它以后，单指不再平移，
+  /// 而**双指仍然平移缩放** —— 这是画图类应用的通行手感。
+  final ValueChanged<GridCell>? onPaintCell;
+
   @override
   Widget build(BuildContext context) {
     final bool gesturesEnabled =
         onScaleStart != null || onScaleUpdate != null || onScaleEnd != null;
 
+    /// 单指时把落点换算成格子并回调；返回是否被绘制接管。
+    bool paintAt(Offset position, int pointerCount) {
+      final ValueChanged<GridCell>? paint = onPaintCell;
+      if (paint == null || pointerCount != 1) {
+        return false;
+      }
+      final GridCell? cell = transform.cellAt(
+        position,
+        rows: pattern.rows,
+        cols: pattern.cols,
+      );
+      if (cell == null) {
+        return false;
+      }
+      paint(cell);
+      return true;
+    }
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onScaleStart: gesturesEnabled ? onScaleStart : null,
-      onScaleUpdate: gesturesEnabled ? onScaleUpdate : null,
+      // onScaleStart 一律转发：万一手势中途从单指变双指（加了一根手指），
+      // 平移缩放要有一个正确的起点，否则会跳一下。
+      // 另外**落笔也要在这里画**：单纯点一下不会触发 onScaleUpdate，
+      // 只在 update 里画会导致"点一下没反应"。
+      onScaleStart: gesturesEnabled
+          ? (ScaleStartDetails details) {
+              paintAt(details.localFocalPoint, details.pointerCount);
+              onScaleStart?.call(details);
+            }
+          : null,
+      onScaleUpdate: gesturesEnabled
+          ? (ScaleUpdateDetails details) {
+              if (paintAt(details.localFocalPoint, details.pointerCount)) {
+                return;
+              }
+              onScaleUpdate?.call(details);
+            }
+          : null,
       onScaleEnd: gesturesEnabled ? onScaleEnd : null,
       onTapUp: onCellTap == null
           ? null
@@ -106,6 +151,7 @@ class GridCanvas extends StatelessWidget {
             hideOtherColors: hideOtherColors,
             progress: progress,
             blink: blink,
+            revision: revision,
           ),
         ),
       ),

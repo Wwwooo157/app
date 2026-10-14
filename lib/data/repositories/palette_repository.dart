@@ -105,5 +105,10 @@ final class PaletteRepository {
   }
 
   static Future<String> _loadFromAssetBundle(String assetPath) =>
-      rootBundle.loadString(assetPath);
+      // cache: false 是**故意的**：`loadString` 默认会缓存 Future，
+      // 而缓存下来的 Future 属于创建它的那个 fake-async zone —— 在 widget test 里
+      // 表现为"第一个测试能加载色卡，后面的测试永远等不到"，而且不报错、
+      // 只是色号悄悄退化成 ?N。色卡文件很小，不缓存更稳，
+      // 顺带也让热重载后能看到 JSON 的改动。
+      rootBundle.loadString(assetPath, cache: false);
 }

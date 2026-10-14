@@ -27,6 +27,7 @@ class GridPainter extends CustomPainter {
     this.hideOtherColors = false,
     this.progress,
     this.blink,
+    this.revision = 0,
   }) : super(repaint: blink);
 
   /// 引导高亮配色。
@@ -44,6 +45,12 @@ class GridPainter extends CustomPainter {
   /// 闪烁动画（0..1）。既作为 `repaint` 触发器（避免每帧重建整棵 widget 树），
   /// 也用于计算高亮脉动；为 null 时高亮为稳定色。
   final Animation<double>? blink;
+
+  /// 图纸/进度的**内容版本号**。
+  ///
+  /// 图纸与进度都是就地修改的（同一个对象），`identical` 比不出变化，
+  /// 所以要靠上层在内容变化时递增这个数，否则画布不会重绘。
+  final int revision;
 
   final BeadPattern pattern;
   final GridTransform transform;
@@ -417,6 +424,7 @@ class GridPainter extends CustomPainter {
         oldDelegate.activeColorIndex != activeColorIndex ||
         oldDelegate.hideOtherColors != hideOtherColors ||
         !identical(oldDelegate.progress, progress) ||
+        oldDelegate.revision != revision ||
         oldDelegate.blink != blink;
   }
 }
