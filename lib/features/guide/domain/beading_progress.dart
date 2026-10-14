@@ -87,6 +87,37 @@ final class BeadingProgress {
   /// 已整体完成的颜色数量。
   int get completedColorCount => _completedColors.length;
 
+  // ---------------------------------------------------------------- 持久化
+
+  /// 逐格标记的原始位图（长度 = rows × cols），用于保存到磁盘。
+  Uint8List toByteMap() => Uint8List.fromList(_placed);
+
+  /// 从位图恢复进度。
+  ///
+  /// 位图长度必须正好等于 rows × cols：不一致说明文件与图纸对不上，
+  /// **宁可明确失败**，也不要加载出一份错位的进度（那比丢进度更糟）。
+  factory BeadingProgress.fromByteMap({
+    required int rows,
+    required int cols,
+    required Uint8List placed,
+    Iterable<int> completedColors = const <int>[],
+  }) {
+    if (rows <= 0 || cols <= 0) {
+      throw ArgumentError('rows/cols 必须大于 0，实际为 $rows x $cols');
+    }
+    if (placed.length != rows * cols) {
+      throw ArgumentError(
+        '进度位图长度 ${placed.length} 与 $rows x $cols = ${rows * cols} 不匹配',
+      );
+    }
+    final BeadingProgress progress = BeadingProgress(rows: rows, cols: cols);
+    progress._placed.setAll(0, placed);
+    for (final int colorIndex in completedColors) {
+      progress.setColorCompleted(colorIndex, completed: true);
+    }
+    return progress;
+  }
+
   // ---------------------------------------------------------------- 其他
 
   /// 清空全部进度。

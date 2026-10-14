@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:bead_light_board/core/constants/app_assets.dart';
 import 'package:bead_light_board/core/theme/app_theme.dart';
+import 'package:bead_light_board/core/widgets/text_input_dialog.dart';
 import 'package:bead_light_board/data/models/bead_color.dart';
 import 'package:bead_light_board/data/models/bead_pattern.dart';
 import 'package:bead_light_board/data/models/palette.dart';
@@ -24,6 +25,8 @@ import 'package:bead_light_board/features/guide/domain/beading_progress.dart';
 import 'package:bead_light_board/features/guide/domain/guide_stats.dart';
 import 'package:bead_light_board/features/guide/domain/guide_style.dart';
 import 'package:bead_light_board/features/guide/presentation/guide_panel.dart';
+import 'package:bead_light_board/features/projects/data/project_repository.dart';
+import 'package:bead_light_board/features/projects/domain/project.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -43,6 +46,10 @@ class GridScreen extends StatefulWidget {
     super.key,
     this.calibrationRepository,
     this.importedPattern,
+    this.project,
+    this.projectRepository,
+    this.sourceImageName,
+    this.autoSaveDebounce = const Duration(milliseconds: 800),
   });
 
   /// 校准参数的读写；测试注入内存实现，避免触碰 path_provider 平台通道。
@@ -50,6 +57,20 @@ class GridScreen extends StatefulWidget {
 
   /// 从图片导入的图纸；null = 用合成图案（开发/演示用）。
   final BeadPattern? importedPattern;
+
+  /// 已保存的项目（从「我的图纸」打开时传入）。
+  ///
+  /// 图纸与进度都取自它，进度变化会自动落盘；为空表示这份图纸还没保存过。
+  final Project? project;
+
+  /// 项目仓库；测试注入内存实现。
+  final ProjectRepository? projectRepository;
+
+  /// 来源图片名（保存为新项目时记录，便于日后认出是哪张图）。
+  final String? sourceImageName;
+
+  /// 进度自动保存的防抖时长（测试传 Duration.zero 以便立即触发）。
+  final Duration autoSaveDebounce;
 
   @override
   State<GridScreen> createState() => GridScreenState();
@@ -103,6 +124,27 @@ class GridScreenState extends State<GridScreen>
 
   late final AnimationController _blinkController;
 
+  // ---------------------------------------------------------------- 项目 M5
+
+  late final ProjectRepository _projectRepository =
+      widget.projectRepository ?? ProjectRepository();
+
+  /// 当前项目；null = 这份图纸还没保存过。
+  Project? _project;
+
+  /// 自动保存防抖计时器。
+  Timer? _autoSaveTimer;
+
+  String? _saveError;
+
+  /// 供测试断言。
+  @visibleForTesting
+  Project? get currentProject => _project;
+
+  /// 供测试断言。
+  @visibleForTesting
+  String? get saveError => _saveError;
+
   // ---------------------------------------------------------------- 护眼 S7
 
   /// 护眼与显示设置（默认开启软调光 + 暖色）。
@@ -145,6 +187,12 @@ class GridScreenState extends State<GridScreen>
     // （widget test 直接超时），实机上也是无谓耗电。
     _calibrationRepository =
         widget.calibrationRepository ?? CalibrationRepository();
+    // 打开已保存的项目：直接用它的图纸与进度对象（进度是可变对象，
+    // 所以就地修改即可，保存时整体写回）。
+    _project = widget.project;
+    if (_project != null) {
+      _progress = _project!.progress;
+    }
     unawaited(_applySystemUi());
     _applyKeepScreenOn();
     _loadDpi();
@@ -154,6 +202,12 @@ class GridScreenState extends State<GridScreen>
 
   @override
   void dispose() {
+    // 退出前把没落盘的进度写掉（dispose 不能 await，所以不等结果）。
+    _autoSaveTimer?.cancel();
+    final Project? project = _project;
+    if (project != null) {
+      unawaited(_projectRepository.save(_projectRepository.touch(project)));
+    }
     _blinkController.dispose();
     // 离开网格页：恢复系统 UI，并释放屏幕常亮（否则会一直亮着耗电）。
     unawaited(_restoreSystemUi());
@@ -229,14 +283,17 @@ class GridScreenState extends State<GridScreen>
 
   ({String label, int rows, int cols}) get _preset => sizePresets[_presetIndex];
 
-  /// 是否正在显示导入的图纸。
+  /// 固定图纸：导入的，或已保存项目里的；null = 用合成图案。
+  BeadPattern? get _fixedPattern => widget.importedPattern ?? _project?.pattern;
+
+  /// 是否正在显示固定图纸（导入的或项目里的）。
   ///
   /// 此时尺寸/图案预设没有意义（图纸尺寸由图片与裁剪决定），需要禁用，
   /// 否则点了没反应会让人以为是坏了。
-  bool get hasImportedPattern => widget.importedPattern != null;
+  bool get hasImportedPattern => _fixedPattern != null;
 
   BeadPattern get _currentPattern => _pattern ??=
-      widget.importedPattern ??
+      _fixedPattern ??
       buildSyntheticPattern(
         rows: _preset.rows,
         cols: _preset.cols,
@@ -331,6 +388,7 @@ class GridScreenState extends State<GridScreen>
       // 所有用到的颜色都完成了：保持当前色，进度自然到 100%。
     });
     _syncBlinkAnimation();
+    _afterProgressChanged();
   }
 
   void _toggleBlink() {
@@ -353,7 +411,88 @@ class GridScreenState extends State<GridScreen>
     }
   }
 
-  void _resetProgress() => setState(() => _ensureProgress().reset());
+  void _resetProgress() {
+    setState(() => _ensureProgress().reset());
+    _afterProgressChanged();
+  }
+
+  // ------------------------------------------------------------ 项目保存 M5
+
+  /// 进度变了：若是已保存的项目，稍后自动落盘。
+  ///
+  /// 防抖是必要的：逐格标记时会连点，每次都写文件既慢又费闪存。
+  void _afterProgressChanged() {
+    if (_project == null) {
+      return;
+    }
+    _autoSaveTimer?.cancel();
+    _autoSaveTimer = Timer(widget.autoSaveDebounce, () {
+      unawaited(_saveProject());
+    });
+  }
+
+  /// 立刻保存当前项目。
+  Future<void> _saveProject() async {
+    final Project? project = _project;
+    if (project == null) {
+      return;
+    }
+    final Project touched = _projectRepository.touch(project);
+    final bool ok = await _projectRepository.save(touched);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _project = touched;
+      _saveError = ok ? null : '进度保存失败（只影响这次写入）';
+    });
+  }
+
+  /// 把当前图纸保存成一个新项目。
+  Future<void> _saveAsNewProject() async {
+    final String? name = await _askProjectName(_suggestedProjectName());
+    if (name == null || !mounted) {
+      return;
+    }
+    final Project created = _projectRepository.create(
+      name: name,
+      pattern: _currentPattern,
+      progress: _ensureProgress(),
+      sourceImageName: widget.sourceImageName,
+    );
+    final bool ok = await _projectRepository.save(created);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _project = created;
+      _saveError = ok ? null : '保存失败，请检查存储空间';
+    });
+  }
+
+  /// 默认名称：优先用来源图片名（去掉扩展名）。
+  String _suggestedProjectName() {
+    final String? source = widget.sourceImageName;
+    if (source != null && source.trim().isNotEmpty) {
+      final int dot = source.lastIndexOf('.');
+      return dot > 0 ? source.substring(0, dot) : source;
+    }
+    return '${_currentPattern.rows} × ${_currentPattern.cols} 图纸';
+  }
+
+  Future<String?> _askProjectName(String suggested) async {
+    final String? name = await TextInputDialog.show(
+      context,
+      title: '保存图纸',
+      initialValue: suggested,
+      labelText: '图纸名称',
+    );
+    if (name == null) {
+      return null;
+    }
+    final String trimmed = name.trim();
+    return trimmed.isEmpty ? suggested : trimmed;
+  }
 
   // ------------------------------------------------------------ 护眼逻辑 S7
 
@@ -545,6 +684,7 @@ class GridScreenState extends State<GridScreen>
     if (_perCellMarking) {
       // 逐格标记：抬起板子补记/纠错时用。
       setState(() => _ensureProgress().togglePlaced(cell.row, cell.col));
+      _afterProgressChanged();
       return;
     }
     setState(() => _selected = cell);
@@ -803,10 +943,27 @@ class GridScreenState extends State<GridScreen>
                 if (hasImportedPattern)
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
-                    child: Chip(
-                      avatar: const Icon(Icons.image_outlined, size: 16),
-                      label: Text('已导入图纸 ${pattern.rows} × ${pattern.cols}'),
-                      backgroundColor: AppColors.surfaceVariant,
+                    // 一枚徽章兼两职：说明"这是导入的图纸"，点它即可保存。
+                    // 刻意不新增控件 —— 顶部面板已够挤，多一行会挡住网格。
+                    child: ActionChip(
+                      avatar: Icon(
+                        _project == null
+                            ? Icons.save_outlined
+                            : (_saveError == null
+                                  ? Icons.save
+                                  : Icons.error_outline),
+                        size: 16,
+                        color: _saveError == null ? null : AppColors.warning,
+                      ),
+                      label: Text(
+                        _saveError ??
+                            (_project == null
+                                ? '已导入图纸 ${pattern.rows} × ${pattern.cols} · 点此保存'
+                                : '已保存 · ${_project!.name}'),
+                      ),
+                      onPressed: _project == null
+                          ? _saveAsNewProject
+                          : () => unawaited(_saveProject()),
                     ),
                   ),
                 for (int i = 0; i < sizePresets.length; i++)

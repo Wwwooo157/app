@@ -251,6 +251,7 @@ class ImportScreenState extends State<ImportScreen> {
           rows: preset.rows,
           cols: preset.cols,
           cropRegion: cropGeometry.normalizedCropRegion,
+          sourceImageName: picked.name,
         ),
       );
       if (!mounted) {

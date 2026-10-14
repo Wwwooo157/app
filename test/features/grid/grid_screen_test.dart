@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:bead_light_board/data/models/bead_pattern.dart';
 import 'package:bead_light_board/features/calibrate/data/calibration_storage.dart';
 import 'package:bead_light_board/features/grid/data/physical_dpi.dart';
@@ -5,6 +7,9 @@ import 'package:bead_light_board/features/grid/domain/grid_style.dart';
 import 'package:bead_light_board/features/grid/presentation/grid_canvas.dart';
 import 'package:bead_light_board/features/grid/presentation/grid_painter.dart';
 import 'package:bead_light_board/features/grid/presentation/grid_screen.dart';
+import 'package:bead_light_board/features/projects/data/project_repository.dart';
+import 'package:bead_light_board/features/projects/data/project_storage.dart';
+import 'package:bead_light_board/features/projects/domain/project.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -59,12 +64,20 @@ void main() {
     WidgetTester tester, {
     CalibrationRepository? repository,
     BeadPattern? importedPattern,
+    Project? project,
+    ProjectRepository? projectRepository,
+    String? sourceImageName,
+    Duration autoSaveDebounce = Duration.zero,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
         home: GridScreen(
           calibrationRepository: repository ?? makeCalibration().repository,
           importedPattern: importedPattern,
+          project: project,
+          projectRepository: projectRepository,
+          sourceImageName: sourceImageName,
+          autoSaveDebounce: autoSaveDebounce,
         ),
       ),
     );
@@ -446,4 +459,184 @@ void main() {
       expect(find.text('剩 1'), findsOneWidget);
     });
   });
+
+  group('M5 项目保存与继续', () {
+    BeadPattern pattern() => BeadPattern.filled(
+      rows: 20,
+      cols: 30,
+      paletteId: 'test_fixture',
+      colorIndex: 1,
+    )..setColorIndexAt(0, 0, 0);
+
+    ({ProjectRepository repository, InMemoryProjectStorage storage})
+    makeProjects() {
+      final InMemoryProjectStorage storage = InMemoryProjectStorage();
+      return (
+        repository: ProjectRepository(
+          storage: storage,
+          clock: () => DateTime(2026, 2, 14, 12),
+        ),
+        storage: storage,
+      );
+    }
+
+    testWidgets('打开已保存的项目：图纸与进度都恢复', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+      final ({ProjectRepository repository, InMemoryProjectStorage storage})
+      projects = makeProjects();
+      final Project project = projects.repository.create(
+        name: '心形',
+        pattern: pattern(),
+      );
+      // 让项目带上真实进度：把用量最多的那色标记为完成
+      project.progress.setColorCompleted(1, completed: true);
+
+      await pumpScreen(
+        tester,
+        project: project,
+        projectRepository: projects.repository,
+      );
+
+      expect(find.textContaining('已保存 · 心形'), findsOneWidget);
+      // 600 格里 599 格是色号 1 → 完成该色后进度立刻可见
+      expect(find.textContaining('599/600 颗'), findsOneWidget);
+      expect(find.textContaining('已完成 1/2 色'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('标记当前色完成后自动落盘（重启能接着拼）', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+      final ({ProjectRepository repository, InMemoryProjectStorage storage})
+      projects = makeProjects();
+      final Project project = projects.repository.create(
+        name: '心形',
+        pattern: pattern(),
+      );
+      await projects.repository.save(project);
+      final int writesBefore = projects.storage.writeCount;
+
+      await pumpScreen(
+        tester,
+        project: project,
+        projectRepository: projects.repository,
+      );
+
+      // 关掉闪烁，避免页面一直有动画（否则 pumpAndSettle 等不到静止）
+      await tester.tap(find.widgetWithText(FilterChip, '闪烁'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(OutlinedButton, '下一色'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, '标记当前色完成'));
+      await tester.pumpAndSettle();
+
+      expect(
+        projects.storage.writeCount,
+        greaterThan(writesBefore),
+        reason: '进度变化后应当自动保存',
+      );
+      final Project reloaded = (await projects.repository.loadAll()).single;
+      expect(reloaded.progress.completedColorCount, 1);
+      expect(reloaded.name, '心形');
+    });
+
+    testWidgets('未保存的导入图纸：点徽章能保存成项目，默认名取自图片名', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+      final ({ProjectRepository repository, InMemoryProjectStorage storage})
+      projects = makeProjects();
+
+      await pumpScreen(
+        tester,
+        importedPattern: pattern(),
+        projectRepository: projects.repository,
+        sourceImageName: 'sample_heart.png',
+      );
+
+      expect(find.textContaining('点此保存'), findsOneWidget);
+      await tester.tap(find.textContaining('点此保存'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('保存图纸'), findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'sample_heart',
+      );
+
+      await tester.tap(find.widgetWithText(FilledButton, '保存'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('已保存 · sample_heart'), findsOneWidget);
+      final Project saved = (await projects.repository.loadAll()).single;
+      expect(saved.name, 'sample_heart');
+      expect(saved.sourceImageName, 'sample_heart.png');
+      expect(saved.pattern.rows, 20);
+      expect(saved.pattern.cols, 30);
+    });
+
+    testWidgets('保存对话框取消时不建项目', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+      final ({ProjectRepository repository, InMemoryProjectStorage storage})
+      projects = makeProjects();
+
+      await pumpScreen(
+        tester,
+        importedPattern: pattern(),
+        projectRepository: projects.repository,
+      );
+
+      await tester.tap(find.textContaining('点此保存'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, '取消'));
+      await tester.pumpAndSettle();
+
+      expect(await projects.repository.loadAll(), isEmpty);
+      expect(find.textContaining('点此保存'), findsOneWidget);
+    });
+
+    testWidgets('写盘失败时明确报错，不假装已保存', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+
+      await pumpScreen(
+        tester,
+        importedPattern: pattern(),
+        projectRepository: ProjectRepository(storage: FailingProjectStorage()),
+      );
+
+      await tester.tap(find.textContaining('点此保存'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, '保存'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('保存失败'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('合成图案（非导入）不显示保存徽章', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+
+      await pumpScreen(tester, projectRepository: makeProjects().repository);
+
+      expect(find.textContaining('点此保存'), findsNothing);
+      expect(find.textContaining('已保存'), findsNothing);
+    });
+  });
+}
+
+/// 写入必定失败：验证界面会明确报错而不是假装成功。
+final class FailingProjectStorage implements ProjectStorage {
+  @override
+  Future<Map<String, String>> readAll() async => <String, String>{};
+
+  @override
+  Future<void> write(String id, String content) async =>
+      throw const FileSystemException('磁盘满了');
+
+  @override
+  Future<void> delete(String id) async {}
 }

@@ -82,6 +82,7 @@ final class ImportRequest {
     required this.cols,
     this.cropRegion,
     this.compositeBackgroundArgb = kDefaultCompositeBackground,
+    this.sourceImageName,
   });
 
   /// 原始图片字节（PNG/JPEG/BMP/WebP 等由 image 包支持）。
@@ -101,6 +102,9 @@ final class ImportRequest {
 
   /// 透明像素合成到的底色。
   final int compositeBackgroundArgb;
+
+  /// 来源图片名（原样带到结果里，保存项目时用作默认名称）。
+  final String? sourceImageName;
 }
 
 /// 一次导入的结果。
@@ -111,6 +115,7 @@ final class ImportOutcome {
     required this.sourceHeight,
     required this.cropPixelWidth,
     required this.cropPixelHeight,
+    this.sourceImageName,
   });
 
   final BeadPattern pattern;
@@ -122,6 +127,9 @@ final class ImportOutcome {
   /// 裁剪后的像素尺寸。
   final int cropPixelWidth;
   final int cropPixelHeight;
+
+  /// 来源图片名（透传自 [ImportRequest]）。
+  final String? sourceImageName;
 
   /// 平均每格覆盖多少原图像素（用于界面提示分辨率是否够）。
   double get pixelsPerCell =>
@@ -240,6 +248,7 @@ ImportOutcome importImageToPattern(ImportRequest request) {
     sourceHeight: decoded.height,
     cropPixelWidth: sourceWidth,
     cropPixelHeight: sourceHeight,
+    sourceImageName: request.sourceImageName,
   );
 }
 

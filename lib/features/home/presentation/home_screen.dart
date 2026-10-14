@@ -3,6 +3,8 @@ import 'package:bead_light_board/core/theme/app_theme.dart';
 import 'package:bead_light_board/features/grid/presentation/grid_screen.dart';
 import 'package:bead_light_board/features/import/domain/image_to_pattern.dart';
 import 'package:bead_light_board/features/import/presentation/import_screen.dart';
+import 'package:bead_light_board/features/projects/domain/project.dart';
+import 'package:bead_light_board/features/projects/presentation/project_list_screen.dart';
 import 'package:flutter/material.dart';
 
 /// 首页：两个入口 —— 导入图片生成图纸（正路）、合成图案网格（开发/演示）。
@@ -32,8 +34,27 @@ class HomeScreen extends StatelessWidget {
     }
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (BuildContext context) =>
-            GridScreen(importedPattern: outcome.pattern),
+        builder: (BuildContext context) => GridScreen(
+          importedPattern: outcome.pattern,
+          sourceImageName: outcome.sourceImageName,
+        ),
+      ),
+    );
+  }
+
+  /// 我的图纸 → 打开选中的项目。
+  Future<void> _openProjects(BuildContext context) async {
+    final Project? picked = await Navigator.of(context).push<Project>(
+      MaterialPageRoute<Project>(
+        builder: (BuildContext context) => const ProjectListScreen(),
+      ),
+    );
+    if (picked == null || !context.mounted) {
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => GridScreen(project: picked),
       ),
     );
   }
@@ -72,6 +93,12 @@ class HomeScreen extends StatelessWidget {
                       onPressed: () => _importImage(context),
                       icon: const Icon(Icons.add_photo_alternate_outlined),
                       label: const Text('导入图片生成图纸'),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: () => _openProjects(context),
+                      icon: const Icon(Icons.folder_open_outlined),
+                      label: const Text('我的图纸（保存与继续拼）'),
                     ),
                     const SizedBox(height: 10),
                     OutlinedButton.icon(
