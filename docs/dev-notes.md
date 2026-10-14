@@ -4,12 +4,15 @@
 
 ## 工具链位置（用户级环境变量，已持久化）
 
-| 组件 | 路径 | 版本 |
+| 组件 | 位置 | 版本（实测） |
 |---|---|---|
-| Flutter SDK | `E:\Flutter_SDK\flutter` | 3.47.7 stable / Dart 3.13.5 |
-| JDK | `E:\JDK_AndroidSDK\jdk-17` | OpenJDK 17.0.20.1（`JAVA_HOME`） |
-| Android SDK | `E:\JDK_AndroidSDK\Sdk` | platform-tools 37.0.1、platforms;android-36、build-tools 36.0.0 + 37.0.0 |
+| Flutter SDK | 独立目录，PATH 已加入其 `bin` | 3.47.7 stable / Dart 3.13.5 |
+| JDK | 独立目录，`JAVA_HOME` 指向它 | OpenJDK 17.0.20.1 |
+| Android SDK | 独立目录，`ANDROID_HOME` 指向它 | platform-tools 37.0.1、platforms;android-36、build-tools 36.0.0 + 37.0.0 |
 | Gradle 缓存 | `%USERPROFILE%\.gradle` | Gradle 9.3.1 |
+
+> 本节刻意**不写本机绝对路径**：换台机器路径必然不同，写死反而误导。
+> 按上表把三者装到任意目录、设好同名环境变量即可。
 
 `JAVA_HOME` / `ANDROID_HOME` / `ANDROID_SDK_ROOT` / `FLUTTER_STORAGE_BASE_URL` / `PUB_HOSTED_URL`
 均为用户级变量；PATH 追加了 `flutter\bin`、`jdk-17\bin`、`platform-tools`、`cmdline-tools\latest\bin`。
@@ -30,7 +33,7 @@
    解决：项目 `android/gradle/wrapper/gradle-wrapper.properties` 的 `distributionUrl`
    指向腾讯镜像 `https://mirrors.cloud.tencent.com/gradle/`（本仓库已改）。
 
-3. **校园网按账号限速 ~1MB/s**（实测 3 路并发不叠加）。手机热点更慢（疑似达量降速）。
+3. **所用网络按账号限速 ~1MB/s**（实测 3 路并发不叠加）。手机热点更慢（疑似达量降速）。
    换频段无用（2.4G 与 5.8G 同档）。**有效手段是换国内源**，不是换网络。
 
 ## Android 构建的两个坑（重要）
