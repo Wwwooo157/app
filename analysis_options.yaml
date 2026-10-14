@@ -1,0 +1,47 @@
+# 静态分析配置：在 flutter_lints 之上加严。
+# 注意：本项目是"屏幕当灯板"的工具类 App，几何/颜色换算逻辑很多，
+# 因此开启 strict-casts / strict-inference，宁可现在多报错，也不要隐式类型转换埋雷。
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+  exclude:
+    - build/**
+    - android/**
+    - windows/**
+    # 代码生成产物（Drift 等在后续阶段引入）不参与 lint
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+  errors:
+    # 忘记 await 的异步调用升级为警告，避免"以为存了其实没存"这类问题
+    unawaited_futures: warning
+    # 未使用的 import 直接报错
+    unused_import: error
+    # 死代码报错
+    dead_code: error
+    # 缺返回类型在严格模式下应当是错误
+    always_declare_return_types: warning
+
+linter:
+  rules:
+    - always_declare_return_types
+    - avoid_print
+    - avoid_redundant_argument_values
+    - avoid_unused_constructor_parameters
+    - cascade_invocations
+    - directives_ordering
+    - join_return_with_assignment
+    - prefer_const_constructors
+    - prefer_const_constructors_in_immutables
+    - prefer_const_declarations
+    - prefer_final_in_for_each
+    - prefer_final_locals
+    - prefer_single_quotes
+    - require_trailing_commas
+    - sort_child_properties_last
+    - unnecessary_lambdas
+    - use_super_parameters
+    - unawaited_futures

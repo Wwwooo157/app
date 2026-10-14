@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "test_fixture",
+  "name": "测试夹具（非真实色号，仅开发与单测使用）",
+  "pitchMm": null,
+  "source": "Synthetic values generated for this project's tests. These are NOT real brand colour codes and must never be shown as if they were.",
+  "_warning": "严禁把这个色卡当成任何品牌的真实色号使用。",
+  "colors": [
+    { "code": "T01", "name": "夹具-近黑", "hex": "#22262B" },
+    { "code": "T02", "name": "夹具-深灰", "hex": "#4A5057" },
+    { "code": "T03", "name": "夹具-中灰", "hex": "#8A9099" },
+    { "code": "T04", "name": "夹具-浅灰", "hex": "#C9CDD2" },
+    { "code": "T05", "name": "夹具-柔和红", "hex": "#B4574F" },
+    { "code": "T06", "name": "夹具-柔和绿", "hex": "#5F8F6A" },
+    { "code": "T07", "name": "夹具-柔和蓝", "hex": "#4F7396" },
+    { "code": "T08", "name": "夹具-柔和黄", "hex": "#C9A75B" }
+  ]
+}

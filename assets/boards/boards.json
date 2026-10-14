@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "_note": "板规格预设。pitchMm 为使用者确认的豆子中心间距（5mm，midi 标准豆）。物理尺寸 = rows/cols x pitchMm。注意 52x52 @5mm = 260mm 见方，大于本机平板屏幕可用区（约 235 x 148mm），因此大板必须用分区引导显示，不能整板 1:1。测算过程见 docs/dev-notes.md。",
+  "boards": [
+    {
+      "id": "square_29",
+      "name": "29 × 29 标准方板",
+      "rows": 29,
+      "cols": 29,
+      "pitchMm": 5
+    },
+    {
+      "id": "square_52",
+      "name": "52 × 52 大方板",
+      "rows": 52,
+      "cols": 52,
+      "pitchMm": 5
+    }
+  ]
+}

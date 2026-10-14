@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "perler",
+  "name": "Perler",
+  "pitchMm": null,
+  "source": "",
+  "_todo": "把真实色号填进 colors 数组。字段说明见 docs/palette-schema.md。",
+  "colors": []
+}
