@@ -1,15 +1,35 @@
 {
-  "schemaVersion": 1,
-  "_note": "色卡清单。新增品牌时：把 <id>.json 放进本目录，再在这里加一条记录。App 无法在运行时枚举资源目录，所以必须有这份索引。",
-  "palettes": [
-    { "id": "mard", "name": "MARD", "asset": "assets/palettes/mard.json" },
-    { "id": "perler", "name": "Perler", "asset": "assets/palettes/perler.json" },
-    { "id": "hama", "name": "Hama", "asset": "assets/palettes/hama.json" },
-    { "id": "artkal", "name": "Artkal", "asset": "assets/palettes/artkal.json" },
-    {
-      "id": "test_fixture",
-      "name": "测试夹具（非真实色号）",
-      "asset": "assets/palettes/test_fixture.json"
-    }
-  ]
+    "schemaVersion":  1,
+    "palettes":  [
+                     {
+                         "id":  "mard",
+                         "name":  "MARD 221 色（主流）",
+                         "asset":  "assets/palettes/mard.json"
+                     },
+                     {
+                         "id":  "mard291",
+                         "name":  "MARD 291 色（完整版）",
+                         "asset":  "assets/palettes/mard291.json"
+                     },
+                     {
+                         "id":  "perler",
+                         "name":  "Perler",
+                         "asset":  "assets/palettes/perler.json"
+                     },
+                     {
+                         "id":  "hama",
+                         "name":  "Hama",
+                         "asset":  "assets/palettes/hama.json"
+                     },
+                     {
+                         "id":  "artkal",
+                         "name":  "Artkal",
+                         "asset":  "assets/palettes/artkal.json"
+                     },
+                     {
+                         "id":  "test_fixture",
+                         "name":  "测试夹具（非真实色号）",
+                         "asset":  "assets/palettes/test_fixture.json"
+                     }
+                 ]
 }

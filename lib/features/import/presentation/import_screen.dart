@@ -40,7 +40,7 @@ class ImportScreen extends StatefulWidget {
     this.picker,
     this.paletteLoader,
     this.runner = runImportInIsolate,
-    this.paletteAssetPath = kFixturePaletteAsset,
+    this.paletteAssetPath = kDefaultPaletteAsset,
     this.sampleLoader = defaultSampleLoader,
   });
 

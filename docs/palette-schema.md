@@ -1,10 +1,35 @@
 # 色卡与板规格数据格式
 
-本 App **不内置任何真实色号**，也不推测色号。色卡与板规格都是普通的 JSON 配置文件，
-放在 `assets/` 下，由你自行填写与维护。本文档说明结构与校验规则。
+色卡与板规格都是普通的 JSON 配置文件，放在 `assets/` 下，可以自行修改与扩充。
+
+> **关于内置色卡**：从 2026-10 起，仓库内置了 **MARD 体系**（`mard.json` 221 色、
+> `mard291.json` 291 色），数据取自公开仓库并交叉验证过，出处与已知分歧都写在
+> 各文件的 `source` 字段里。其余品牌（perler / hama / artkal）仍为空，等填写。
+> **请以手上的实物色卡为准**，发现偏差直接改 JSON。
 
 解析代码：`lib/data/models/palette.dart`、`lib/data/models/bead_color.dart`。
 校验规则有单测覆盖，写错时会给出**具体字段路径**（例如 `colors[3].hex`）。
+
+---
+
+## 0. MARD 内置数据说明
+
+| 文件 | 色数 | 说明 |
+|---|---:|---|
+| `assets/palettes/mard.json` | 221 | 国内主流参考体系，**默认色卡** |
+| `assets/palettes/mard291.json` | 291 | 221 的扩展完整版（多 P/Q/R/T/Y/ZG 组） |
+
+- 出处：[HansBug/pindou-color-data](https://github.com/HansBug/pindou-color-data)
+  的 `mard-221-alfonse-doudou/`、`mard-291-github/`；该仓库交叉验证了
+  xiaoana、Zippland/perler-beads、PinDou 等公开来源。
+- **已知分歧（重要）**：同仓库的 `mard-221-github`（源码版）与本仓库采用的
+  `alfonse-doudou` 版，**221 个色号完全一致，但有 77 个 HEX 不同**（144 个一致）。
+  本仓库采用其 README 推荐的 `alfonse-doudou` 版。哪一版更接近实物，需要在实物色卡上核。
+- 色卡里**没有色名**：来源数据只提供色号/HEX/分组，我们不编造中文色名。
+  需要的话可以在 `colors[].name` 里自己补。
+- 守方向的测试：`test/features/quantize/mard_palette_test.dart`（浅色不许映射到暗色、
+  红色必须落在红通道最强的色）与 `test/features/import/mard_import_test.dart`
+  （示例图 + MARD 的端到端结果）。
 
 ---
 

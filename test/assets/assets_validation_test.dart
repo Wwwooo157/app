@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:bead_light_board/data/models/bead_color.dart';
 import 'package:bead_light_board/data/models/board_spec.dart';
 import 'package:bead_light_board/data/models/palette.dart';
 import 'package:bead_light_board/data/repositories/board_repository.dart';
@@ -33,23 +34,54 @@ void main() {
       }
     });
 
-    test('正式品牌色卡留空等填写；夹具色卡非空且已标注非真实色号', () async {
+    test('MARD 色卡有真实数据，且 221/291 的结构自洽', () async {
       final PaletteRepository repository = PaletteRepository(
         loader: fileLoader,
       );
 
-      const List<String> brandPalettes = <String>[
+      final Palette mard = await repository.loadPalette(
         'assets/palettes/mard.json',
+      );
+      expect(mard.isEmpty, isFalse, reason: 'MARD 是默认色卡，必须非空');
+      expect(mard.colors, hasLength(221), reason: 'MARD 主流体系为 221 色');
+      // 色号唯一性由解析器保证（重复会直接抛错），这里再钉一次
+      expect(mard.colors.map((BeadColor c) => c.code).toSet(), hasLength(221));
+
+      final Palette mard291 = await repository.loadPalette(
+        'assets/palettes/mard291.json',
+      );
+      expect(mard291.colors, hasLength(291));
+
+      // 291 是 221 的扩展：221 的色号应被 291 全部覆盖
+      final Set<String> codes221 = mard.colors
+          .map((BeadColor c) => c.code)
+          .toSet();
+      final Set<String> codes291 = mard291.colors
+          .map((BeadColor c) => c.code)
+          .toSet();
+      expect(
+        codes291.containsAll(codes221),
+        isTrue,
+        reason: '291 应包含 221 的全部色号',
+      );
+    });
+
+    test('尚未填写的品牌色卡保持为空（等使用者填）', () async {
+      final PaletteRepository repository = PaletteRepository(
+        loader: fileLoader,
+      );
+
+      // 只列**确实还是空**的品牌；MARD 已经有真实数据，不在此列。
+      for (final String path in <String>[
         'assets/palettes/perler.json',
         'assets/palettes/hama.json',
         'assets/palettes/artkal.json',
-      ];
-      for (final String path in brandPalettes) {
+      ]) {
         final Palette palette = await repository.loadPalette(path);
         expect(
           palette.isEmpty,
           isTrue,
-          reason: '$path 目前应为空（真实色号由使用者填写，App 不内置也不猜测色号）',
+          reason: '$path 仍未填写；空色卡会让量化功能被禁用（刻意的设计）',
         );
       }
 

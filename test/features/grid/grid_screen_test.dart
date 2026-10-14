@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:bead_light_board/core/constants/app_assets.dart';
 import 'package:bead_light_board/data/models/bead_pattern.dart';
 import 'package:bead_light_board/features/calibrate/data/calibration_storage.dart';
 import 'package:bead_light_board/features/edit/presentation/edit_toolbar.dart';
@@ -70,6 +71,9 @@ void main() {
     ProjectRepository? projectRepository,
     String? sourceImageName,
     Duration autoSaveDebounce = Duration.zero,
+    // 测试一律用夹具色卡：真实色卡（MARD）是会随使用者更新的数据，
+    // 不该让断言跟着它变。
+    String paletteAssetPath = kFixturePaletteAsset,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -80,6 +84,7 @@ void main() {
           projectRepository: projectRepository,
           sourceImageName: sourceImageName,
           autoSaveDebounce: autoSaveDebounce,
+          paletteAssetPath: paletteAssetPath,
         ),
       ),
     );

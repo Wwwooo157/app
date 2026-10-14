@@ -101,6 +101,66 @@
 3. **别在用户正在操作平板时注入触摸**：会与用户的手势互相干扰，表现为
    "控件自己变了 / 点击没反应 / 原点莫名偏移"，极难排查。注入前先确认没人在用。
 
+## MARD 真实色卡接入记录（2026-10）
+
+### 数据来源与交叉验证
+
+| 项 | 值 |
+|---|---|
+| 仓库 | [HansBug/pindou-color-data](https://github.com/HansBug/pindou-color-data)（"拼豆色卡四件套交付目录"） |
+| 采用文件 | `mard-221-alfonse-doudou/colors.json` → `mard.json`（221 色）<br>`mard-291-github/colors.json` → `mard291.json`（291 色） |
+| 该仓库的方法论 | 交叉验证 xiaoana、Zippland/perler-beads、PinDou colorSystemMapping、get-colors-from-beans 等来源；对上游重复/缺失色号做了修正与标注 |
+
+我自己做的校验（`test/assets/assets_validation_test.dart` + 一次性比对脚本）：
+
+- 两个 221 来源：**色号集合完全一致**（各 0 个独有）；
+  **144 个 HEX 一致、77 个不同** —— 与仓库 README 的自述**分毫不差**，说明解析无误。
+- 221/291 均为 **0 个非 6 位 HEX、0 个重复色号**，可直接通过本项目 schema。
+- 291 是 221 的超集（221 的色号被 291 全部覆盖）。
+
+> ⚠️ **77 个 HEX 有分歧**，且来源数据**没有色名**。本仓库采用其推荐的 alfonse-doudou 版，
+> 并把这条写进了 `mard.json` 的 `source` 字段。哪一版更接近实物，只能拿着实物色卡核。
+
+### ⚠️ 网络坑：raw.githubusercontent.com 在本机不可达
+
+`raw.githubusercontent.com` 与 `cdn.jsdelivr.net` 在本机 DNS/连接均失败
+（web_fetch 直接报 "resolves to a non-public IP address"）。可用通道：
+
+| 通道 | 结果 |
+|---|---|
+| `https://gcore.jsdelivr.net/gh/<owner>/<repo>@<branch>/<path>` | ✅ 可用（本次采用） |
+| `https://ghproxy.net/https://raw.githubusercontent.com/...` | ✅ 可用（与上者字节数一致，可互相印证） |
+| `https://api.github.com/repos/<owner>/<repo>` | ✅ 可用（仓库元数据） |
+| `cdn.jsdelivr.net` / `raw.githubusercontent.com` / `raw.gitmirror.com` | ❌ 不可用 |
+
+### ⚠️ PowerShell 取网络的坑
+
+`Invoke-WebRequest` 在这个 PowerShell 里 `.Content` 是**字符串**、不是 byte[]；
+我两次误用 `[System.Text.Encoding]::UTF8.GetString($r.Content)` 并把 `WriteAllBytes` 传字符串，
+结果把整份 JSON 打进了终端（浪费上下文）。**正确姿势**：
+`Invoke-WebRequest -OutFile <path>` 落盘，再用
+`Get-Content <path> -Raw -Encoding UTF8 | ConvertFrom-Json` 解析，且**只打印统计摘要**。
+
+### 验证：单测与真机结果逐色号一致
+
+示例图（暖白背景 + 红心）→ 52×52，用 MARD 221 量化：
+
+| 色号 | 单测格数 | 真机格数 |
+|---|---:|---:|
+| H19 #F2EEE5 | 2045 | 2045 |
+| F9 #E0677A | 551 | 551 |
+| F19 #BE454A | 39 | 39 |
+| E11 / F14 / E15 | 19 / 16 / 15 | 19 / 16 / 15 |
+
+合计 2704 ✓。**两边逐色号一致**，说明流水线在 isolate 里与单测里行为相同。
+
+> 教训：中途真机曾出现"浅色被量化成近黑色"的结果，我一度判定是量化 bug。
+> 实际原因是一串**盲点击**把相册选择器打开、选中了用户相册里的一张深色截图。
+> **看到与单测不符的真机结果时，先确认输入是什么**，再怀疑代码。
+
+
+### 真机证据（OPPO Pad）
+
 ## S10 真机验证记录（图纸编辑器）
 
 ### 真机证据（OPPO Pad）

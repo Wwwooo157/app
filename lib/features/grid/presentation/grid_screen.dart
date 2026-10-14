@@ -54,6 +54,7 @@ class GridScreen extends StatefulWidget {
     this.projectRepository,
     this.sourceImageName,
     this.autoSaveDebounce = const Duration(milliseconds: 800),
+    this.paletteAssetPath = kDefaultPaletteAsset,
   });
 
   /// 校准参数的读写；测试注入内存实现，避免触碰 path_provider 平台通道。
@@ -76,6 +77,10 @@ class GridScreen extends StatefulWidget {
   /// 进度自动保存的防抖时长（测试传 Duration.zero 以便立即触发）。
   final Duration autoSaveDebounce;
 
+  /// 色卡资源路径。默认用真实色卡（MARD 221）；
+  /// 测试注入夹具色卡，以保证断言不受真实数据变动影响。
+  final String paletteAssetPath;
+
   @override
   State<GridScreen> createState() => GridScreenState();
 }
@@ -83,10 +88,6 @@ class GridScreen extends StatefulWidget {
 /// 公开给测试使用（widget test 需要拿到内部状态做断言）。
 class GridScreenState extends State<GridScreen>
     with SingleTickerProviderStateMixin {
-  /// 夹具色卡（非真实色号）。导入与网格**必须**用同一张色卡，
-  /// 否则量化出的索引与显示的颜色会对不上（见 app_assets.dart）。
-  static const String fixtureAssetPath = kFixturePaletteAsset;
-
   /// 使用者确认过的豆子中心间距。
   static const double pitchMm = 5;
 
@@ -271,7 +272,7 @@ class GridScreenState extends State<GridScreen>
     try {
       // 超时兜底：资源读取若卡住，界面必须说出来，而不是悄悄没有颜色。
       final Palette palette = await PaletteRepository()
-          .loadPalette(fixtureAssetPath)
+          .loadPalette(widget.paletteAssetPath)
           .timeout(const Duration(seconds: 3));
       if (!mounted) {
         return;
