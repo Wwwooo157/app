@@ -27,7 +27,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"bead_light_board", origin, size)) {
+  // Window title is the app name (U+8C46), written as a \u escape on purpose:
+  // this file must stay pure ASCII so the build does not depend on MSVC's
+  // source charset setting (default = system ANSI code page, where a literal
+  // CJK character would be mis-decoded). Same rule as the Gradle scripts.
+  if (!window.Create(L"\u8c46", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

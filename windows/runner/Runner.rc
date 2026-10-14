@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.dsh" "\0"
-            VALUE "FileDescription", "bead_light_board" "\0"
+            VALUE "FileDescription", "豆" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "bead_light_board" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.dsh. All rights reserved." "\0"
+            VALUE "LegalCopyright", "MIT License - Copyright (C) 2026 Wwwooo157" "\0"
             VALUE "OriginalFilename", "bead_light_board.exe" "\0"
-            VALUE "ProductName", "bead_light_board" "\0"
+            VALUE "ProductName", "豆" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
