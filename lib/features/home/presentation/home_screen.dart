@@ -1,24 +1,50 @@
 import 'package:bead_light_board/core/constants/app_strings.dart';
 import 'package:bead_light_board/core/theme/app_theme.dart';
 import 'package:bead_light_board/features/grid/presentation/grid_screen.dart';
+import 'package:bead_light_board/features/import/domain/image_to_pattern.dart';
+import 'package:bead_light_board/features/import/presentation/import_screen.dart';
 import 'package:flutter/material.dart';
 
-/// 首页（S0 占位）。
-///
-/// 当前只显示工程骨架状态与后续里程碑，用于验证：
-/// 主题装配、横屏布局、以及"骨架能被启动"这条最小闭环。
-/// 真正的功能入口会在 S1（图纸生成）之后逐步替换这里。
+/// 首页：两个入口 —— 导入图片生成图纸（正路）、合成图案网格（开发/演示）。
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
-  static const List<({String phase, String title})> _milestones =
-      <({String phase, String title})>[
-        (phase: 'M2', title: '全屏网格 + 物理对齐（最小可用产品）'),
-        (phase: 'M3', title: '单色高亮 / 分步引导 / 进度统计'),
-        (phase: 'M4', title: '护眼模式 / 防误触 / 常亮'),
-        (phase: 'M5', title: '项目保存与加载 / 透视补偿'),
-        (phase: 'M6', title: '编辑器 / 导出 PNG·PDF'),
+  static const List<({String phase, String title, bool done})> _milestones =
+      <({String phase, String title, bool done})>[
+        (phase: 'M1', title: '导入图片 → 裁剪 → 像素化 → 色卡量化', done: true),
+        (phase: 'M2', title: '全屏网格 + 物理对齐（最小可用产品）', done: true),
+        (phase: 'M3', title: '单色高亮 / 分步引导 / 进度统计', done: true),
+        (phase: 'M4', title: '护眼 / 沉浸式 / 屏幕常亮', done: true),
+        (phase: 'M5', title: '项目保存与加载 / 透视补偿', done: false),
+        (phase: 'M6', title: '编辑器 / 导出 PNG·PDF', done: false),
       ];
+
+  /// 导入图片 → 生成图纸 → 直接进入网格页。
+  Future<void> _importImage(BuildContext context) async {
+    final ImportOutcome? outcome = await Navigator.of(context)
+        .push<ImportOutcome>(
+          MaterialPageRoute<ImportOutcome>(
+            builder: (BuildContext context) => const ImportScreen(),
+          ),
+        );
+    if (outcome == null || !context.mounted) {
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) =>
+            GridScreen(importedPattern: outcome.pattern),
+      ),
+    );
+  }
+
+  void _openSyntheticGrid(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => const GridScreen(),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -41,27 +67,22 @@ class HomeScreen extends StatelessWidget {
                       AppStrings.appTagline,
                       style: theme.textTheme.titleLarge,
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 20),
                     FilledButton.icon(
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (BuildContext context) => const GridScreen(),
-                        ),
-                      ),
+                      onPressed: () => _importImage(context),
+                      icon: const Icon(Icons.add_photo_alternate_outlined),
+                      label: const Text('导入图片生成图纸'),
+                    ),
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: () => _openSyntheticGrid(context),
                       icon: const Icon(Icons.grid_on),
-                      label: const Text('打开网格预览（S4 · 合成图纸）'),
+                      label: const Text('打开网格（合成图案，用于校准）'),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 20),
                     Text(
-                      'S4 已就绪：1:1 物理网格、窗口平移、命中测试。'
-                      '图纸暂时用夹具色卡的合成图案（非真实色号）。',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '下一步 M1：导入图片 → 裁剪 → 像素化 → 色卡量化。',
+                      '导入后先裁剪范围，再按选区平均色匹配到色卡，'
+                      '然后进入 1:1 物理网格开始拼豆。',
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: AppColors.textSecondary,
                       ),
@@ -79,17 +100,26 @@ class HomeScreen extends StatelessWidget {
                     itemCount: _milestones.length,
                     separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (BuildContext context, int index) {
-                      final ({String phase, String title}) item =
+                      final ({String phase, String title, bool done}) item =
                           _milestones[index];
                       return ListTile(
                         dense: true,
                         leading: Text(
                           item.phase,
                           style: theme.textTheme.labelLarge?.copyWith(
-                            color: AppColors.accent,
+                            color: item.done
+                                ? AppColors.accent
+                                : AppColors.textSecondary,
                           ),
                         ),
                         title: Text(item.title),
+                        trailing: item.done
+                            ? const Icon(
+                                Icons.check_circle_outline,
+                                size: 18,
+                                color: AppColors.accent,
+                              )
+                            : null,
                       );
                     },
                   ),

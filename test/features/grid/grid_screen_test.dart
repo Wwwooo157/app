@@ -1,3 +1,4 @@
+import 'package:bead_light_board/data/models/bead_pattern.dart';
 import 'package:bead_light_board/features/calibrate/data/calibration_storage.dart';
 import 'package:bead_light_board/features/grid/data/physical_dpi.dart';
 import 'package:bead_light_board/features/grid/domain/grid_style.dart';
@@ -57,11 +58,13 @@ void main() {
   Future<void> pumpScreen(
     WidgetTester tester, {
     CalibrationRepository? repository,
+    BeadPattern? importedPattern,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
         home: GridScreen(
           calibrationRepository: repository ?? makeCalibration().repository,
+          importedPattern: importedPattern,
         ),
       ),
     );
@@ -382,6 +385,65 @@ void main() {
       await tester.tapAt(const Offset(500, 400));
       await tester.pump();
       expect(find.textContaining('已选中：第'), findsOneWidget);
+    });
+  });
+
+  group('M1 导入的图纸', () {
+    BeadPattern imported() => BeadPattern.filled(
+      rows: 20,
+      cols: 30,
+      paletteId: 'test_fixture',
+      colorIndex: 1,
+    )..setColorIndexAt(0, 0, 0);
+
+    testWidgets('显示导入图纸的尺寸，并禁用尺寸/合成图案预设', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+
+      await pumpScreen(tester, importedPattern: imported());
+
+      expect(find.textContaining('已导入图纸 20 × 30'), findsOneWidget);
+      // 图纸状态栏也报出真实尺寸
+      expect(find.textContaining('图纸 30 × 20'), findsOneWidget);
+
+      for (final String label in <String>['29 × 29', '52 × 52', '色带', '棋盘']) {
+        expect(
+          tester
+              .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, label))
+              .onSelected,
+          isNull,
+          reason: '$label 在导入图纸后应被禁用',
+        );
+      }
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('没有导入图纸时预设仍可用（回归保护）', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+
+      await pumpScreen(tester);
+
+      expect(find.textContaining('已导入图纸'), findsNothing);
+      expect(
+        tester
+            .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, '29 × 29'))
+            .onSelected,
+        isNotNull,
+      );
+    });
+
+    testWidgets('导入图纸的颜色能正常进入引导（用量统计生效）', (WidgetTester tester) async {
+      useTabletViewport(tester);
+      mockDpi();
+
+      await pumpScreen(tester, importedPattern: imported());
+
+      // 600 格里 1 格是色号 0，其余是色号 1
+      expect(find.textContaining('0/600 颗'), findsOneWidget);
+      expect(find.textContaining('已完成 0/2 色'), findsOneWidget);
+      expect(find.textContaining('剩 599'), findsOneWidget);
+      expect(find.text('剩 1'), findsOneWidget);
     });
   });
 }

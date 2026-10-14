@@ -36,6 +36,8 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_riverpod: ^3.4.3
   path_provider: ^2.1.6
+  image: ^4.12.0
+  image_picker: ^1.2.4
 
 dev_dependencies:
   flutter_test:
@@ -64,6 +66,8 @@ flutter:
   assets:
     - assets/palettes/
     - assets/boards/
+    # 内置示例图：不碰相册也能试跑"导入 → 裁剪 → 量化"整条链路
+    - assets/samples/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

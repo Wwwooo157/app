@@ -101,6 +101,62 @@
 3. **别在用户正在操作平板时注入触摸**：会与用户的手势互相干扰，表现为
    "控件自己变了 / 点击没反应 / 原点莫名偏移"，极难排查。注入前先确认没人在用。
 
+## M1 真机验证记录（图片导入 → 裁剪 → 像素化 → 量化）
+
+### 真机证据（OPPO Pad）
+
+| 验证项 | 证据 |
+|---|---|
+| 相册选图 | 点「选择图片」正常唤起系统照片选择器（Android 14 照片选择器，无需存储权限） |
+| 取消路径 | 在选择器里按返回，App 不崩、仍停在导入页 |
+| 内置示例图 | 「用示例图试试」直接进入裁剪页，全程不碰相册 |
+| 自绘裁剪 | 心形示例图显示在取景框内，底部实时显示「选区 480 × 480 像素 → 52 × 52 格，每格约 85 个像素」（480²/2704 = 85.2，吻合） |
+| 量化结果 | 生成后色号条为 **T04 剩 2093 + T05 剩 611 = 2704**，正好等于 52×52；总览里能看清红色心形轮廓 |
+| 图纸接入网格 | 顶部出现「已导入图纸 52 × 52」徽章，尺寸预设与合成图案**自动置灰**（避免点了没反应） |
+| 稳定性 | 全流程无 FATAL / AndroidRuntime 异常 |
+
+> **隐私**：验证过程中系统选择器会列出真实相册内容，我**没有点开任何一张私人照片**，
+> 改用「内置示例图」这条路径完成端到端验证。
+
+### 量化算法
+
+- 色彩空间用 **CIE Lab（D65）+ CIE76 欧氏距离**，而不是直接比 RGB：
+  RGB 距离与人眼感受不成比例，深色与饱和区尤其明显。
+  单测里有一条专门证明这点：#800080 在 [红, 蓝] 色卡里 Lab 判给蓝，而 RGB 距离完全打平。
+- 参考值单测：白/黑/红/绿/蓝的 Lab 与标准表一致（红 L=53.24 / a=80.09 / b=67.20 等）。
+- 降采样用**面积平均**（不是最近邻）：每格取选区内的平均色，照片缩小时不会出现摩尔纹式的丢格。
+- 透明像素按 alpha 合成到**暖白 #E4E2DE**（不是纯白，也不是丢弃），可配置。
+
+### ⚠️ 环境坑：Kotlin 增量编译在 Windows 上偶发失败
+
+加 `image_picker` 后构建报：
+
+```
+Execution failed for task ':image_picker_android:compileDebugKotlin'.
+> java.lang.Exception: Could not close incremental caches in
+  build/image_picker_android/kotlin/compileDebugKotlin/cacheable/caches-jvm/...
+```
+
+删缓存、停 Gradle 守护进程都**无效**；`--stacktrace` 里**没有任何文件系统异常**
+（没有 AccessDenied / IOException），是编译器自身关闭增量缓存时的故障。
+
+修法（已写进 `android/gradle.properties`）：
+
+```properties
+kotlin.incremental=false
+kotlin.compiler.execution.strategy=in-process
+```
+
+关掉增量编译 + 把编译器放进 Gradle 进程内，避开那条代码路径。代价是增量构建稍慢，但**确定性**。
+
+### 依赖与限制
+
+- 新增依赖：`image ^4.12.0`（解码/裁剪/像素操作）、`image_picker ^1.2.4`（相册）。
+- `pub add` 会再次报 "Building with plugins requires symlink support / Developer Mode"
+  —— 只影响 **Windows 桌面版**；Android 构建与安装完全正常。
+- 选图时用 `maxWidth/maxHeight = 2048` 限制长边：52×52 图纸每格 10 像素也只要 520px，
+  2048 足够，却避免了把 5000 万像素原图整张解码（省内存省时间）。
+
 ## S7 真机验证记录（护眼 / 沉浸式 / 屏幕常亮）
 
 | 验证项 | 证据 |

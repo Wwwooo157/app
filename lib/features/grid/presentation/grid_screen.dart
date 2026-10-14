@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:bead_light_board/core/constants/app_assets.dart';
 import 'package:bead_light_board/core/theme/app_theme.dart';
 import 'package:bead_light_board/data/models/bead_color.dart';
 import 'package:bead_light_board/data/models/bead_pattern.dart';
@@ -38,10 +39,17 @@ import 'package:flutter/services.dart';
 ///    也不能拿假数据算出一个看着对齐、实际错位的网格。
 /// 2. 一旦手动缩放偏离 1，界面必须明确标出"当前非严格 1:1"。
 class GridScreen extends StatefulWidget {
-  const GridScreen({super.key, this.calibrationRepository});
+  const GridScreen({
+    super.key,
+    this.calibrationRepository,
+    this.importedPattern,
+  });
 
   /// 校准参数的读写；测试注入内存实现，避免触碰 path_provider 平台通道。
   final CalibrationRepository? calibrationRepository;
+
+  /// 从图片导入的图纸；null = 用合成图案（开发/演示用）。
+  final BeadPattern? importedPattern;
 
   @override
   State<GridScreen> createState() => GridScreenState();
@@ -50,8 +58,9 @@ class GridScreen extends StatefulWidget {
 /// 公开给测试使用（widget test 需要拿到内部状态做断言）。
 class GridScreenState extends State<GridScreen>
     with SingleTickerProviderStateMixin {
-  /// S2/S3 还没做，先用夹具色卡（非真实色号）驱动合成图纸。
-  static const String fixtureAssetPath = 'assets/palettes/test_fixture.json';
+  /// 夹具色卡（非真实色号）。导入与网格**必须**用同一张色卡，
+  /// 否则量化出的索引与显示的颜色会对不上（见 app_assets.dart）。
+  static const String fixtureAssetPath = kFixturePaletteAsset;
 
   /// 使用者确认过的豆子中心间距。
   static const double pitchMm = 5;
@@ -220,12 +229,20 @@ class GridScreenState extends State<GridScreen>
 
   ({String label, int rows, int cols}) get _preset => sizePresets[_presetIndex];
 
-  BeadPattern get _currentPattern => _pattern ??= buildSyntheticPattern(
-    rows: _preset.rows,
-    cols: _preset.cols,
-    kind: _kind,
-    paletteSize: math.max(1, _paletteColors.length),
-  );
+  /// 是否正在显示导入的图纸。
+  ///
+  /// 此时尺寸/图案预设没有意义（图纸尺寸由图片与裁剪决定），需要禁用，
+  /// 否则点了没反应会让人以为是坏了。
+  bool get hasImportedPattern => widget.importedPattern != null;
+
+  BeadPattern get _currentPattern => _pattern ??=
+      widget.importedPattern ??
+      buildSyntheticPattern(
+        rows: _preset.rows,
+        cols: _preset.cols,
+        kind: _kind,
+        paletteSize: math.max(1, _paletteColors.length),
+      );
 
   // ------------------------------------------------------------ 引导逻辑 S6
 
@@ -783,11 +800,23 @@ class GridScreenState extends State<GridScreen>
                   onSelected: (_) => _setOneToOne(false),
                 ),
                 const SizedBox(width: 8),
+                if (hasImportedPattern)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Chip(
+                      avatar: const Icon(Icons.image_outlined, size: 16),
+                      label: Text('已导入图纸 ${pattern.rows} × ${pattern.cols}'),
+                      backgroundColor: AppColors.surfaceVariant,
+                    ),
+                  ),
                 for (int i = 0; i < sizePresets.length; i++)
                   ChoiceChip(
                     label: Text(sizePresets[i].label),
                     selected: _presetIndex == i,
-                    onSelected: (_) => _changePreset(i),
+                    // 导入的图纸尺寸固定，预设尺寸无意义 -> 禁用
+                    onSelected: hasImportedPattern
+                        ? null
+                        : (_) => _changePreset(i),
                   ),
                 const SizedBox(width: 8),
                 for (final SyntheticKind kind in SyntheticKind.values)
@@ -798,7 +827,9 @@ class GridScreenState extends State<GridScreen>
                       SyntheticKind.checker => '棋盘',
                     }),
                     selected: _kind == kind,
-                    onSelected: (_) => _changeKind(kind),
+                    onSelected: hasImportedPattern
+                        ? null
+                        : (_) => _changeKind(kind),
                   ),
                 const SizedBox(width: 8),
                 ChoiceChip(
